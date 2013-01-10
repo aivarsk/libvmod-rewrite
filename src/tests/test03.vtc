@@ -1,0 +1,22 @@
+varnishtest "Test rewrite vmod"
+
+server s1 {
+   rxreq
+   txresp -body "\nTake the blue pill\n"
+} -start
+
+varnish v1 -vcl+backend {
+    import rewrite from "${vmod_topbuild}/src/.libs/libvmod_rewrite.so";
+
+    sub vcl_deliver {
+        rewrite.rewrite_re("blue", "red");
+    }
+} -start
+
+client c1 {
+    txreq -url "/"
+    rxresp
+}
+
+client c1 -run
+

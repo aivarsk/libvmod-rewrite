@@ -1,0 +1,21 @@
+varnishtest "Test rewrite vmod"
+
+server s1 {
+   rxreq
+   txresp -body "\nhttps://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=someid&lc=LV&item_name=libvmod%2drewrite&currency_code=USD&bn=PP%2dDonationsBF%3abtn_donate_SM%2egif%3aNonHosted\n"
+} -start
+
+varnish v1 -vcl+backend {
+    import rewrite from "${vmod_topbuild}/src/.libs/libvmod_rewrite.so";
+
+    sub vcl_deliver {
+        rewrite.rewrite_re("https://www.paypal.com/cgi-bin/webscr\?cmd=_donations&business=[^&]+&", "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=FUPUJSJ9KCPAL&");
+    }
+} -start
+
+client c1 {
+    txreq -url "/"
+    rxresp
+}
+
+client c1 -run

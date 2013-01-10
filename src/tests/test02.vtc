@@ -1,0 +1,22 @@
+varnishtest "Test rewrite vmod"
+
+server s1 {
+   rxreq
+   txresp -body "The quick brown fox jumps over the lazy dog"
+} -start
+
+varnish v1 -vcl+backend {
+    import rewrite from "${vmod_topbuild}/src/.libs/libvmod_rewrite.so";
+
+    sub vcl_deliver {
+        rewrite.rewrite_re("The (.*) jumps over the (.*)", "The \2 jumps over the \1");
+    }
+} -start
+
+client c1 {
+    txreq -url "/"
+    rxresp
+}
+
+client c1 -run
+

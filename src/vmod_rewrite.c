@@ -25,13 +25,14 @@
     parts of libvmod-example used as well as that of the covered work.}
 */
 
-#include <stdio.h>
 #define DEBUG(fmt, args...) do { \
     FILE *f = fopen("/tmp/vmod_zzzz.log", "a"); \
     fprintf(f, fmt, ##args); \
     fclose(f); \
 } while (0)
 
+
+#include <stdio.h>
 #include <stdlib.h>
 #include <regex.h>
 
@@ -72,6 +73,7 @@ static void _set_content_len(struct sess *sp, struct http *rsp, size_t len) {
     header = WS_Alloc(sp->wrk->ws, 32);
     sprintf(header, "Content-Length: %jd", (intmax_t)len);
     http_SetH(rsp, rsp->nhd++, header);
+    http_GetHdr(sp->wrk->resp, H_Content_Length, &sp->wrk->h_content_length);
 }
 
 static void _fix_content_len(struct sess *sp, struct http *rsp, size_t len) {
@@ -132,9 +134,11 @@ static struct buf_t _object_read(struct sess *sp) {
         http_Unset(sp->wrk->resp, H_Content_Encoding);
 
         _set_content_len(sp, sp->wrk->resp, buf.len);
-        http_GetHdr(sp->wrk->resp, H_Content_Length, &sp->wrk->h_content_length);
+    DEBUG("%s %d\n", __func__, __LINE__);
     }
+    BUF_RESERVE(&buf, 1);
     buf.ptr[buf.len] = '\0';
+    DEBUG("%s %d\n", __func__, __LINE__);
     return buf;
 }
 
@@ -152,6 +156,7 @@ static void _object_write(struct sess *sp, struct buf_t buf) {
         return;
     }
 
+    DEBUG("%s %d\n", __func__, __LINE__);
     /* Create a new object and copy data to it */
     sp->obj = STV_NewObject(sp, TRANSIENT_STORAGE, buf.len, &sp->wrk->exp, 0);
     while (pos < buf.len) {
@@ -166,22 +171,26 @@ static void _object_write(struct sess *sp, struct buf_t buf) {
             st->len = st->space;
         }
 
+    DEBUG("%s %d\n", __func__, __LINE__);
         pos += st->len;
         VTAILQ_INSERT_TAIL(&sp->obj->store, st, list);
     }
     if (st->len < st->space) {
         STV_trim(st, st->len);
     }
+    DEBUG("%s %d\n", __func__, __LINE__);
 
     /* XXX: hmmm... */
     sp->obj->len = buf.len;
     sp->obj->gziped = 0;
     sp->obj->xid = sp->xid;
     sp->obj->response = sp->err_code;
+    sp->objcore = sp->obj->objcore;
 
     //if (sp->obj->objcore != NULL) {
     //  EXP_Insert(sp->obj);
     //}
+    DEBUG("%s %d\n", __func__, __LINE__);
 
     /* If Content-Length header is present, update it to actual length */
     _fix_content_len(sp, sp->wrk->resp, buf.len);
@@ -197,12 +206,13 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
     replacement.ptr = NULL;
     BUF_GROW(&replacement);
 
+    DEBUG("%s %d\n", __func__, __LINE__);
     buf_pos = 0;
     while (regexec(re_search, buf->ptr + buf_pos,
                 sizeof(pmatch) / sizeof(pmatch[0]), pmatch, 0) == 0) {
 
         const char *pos;
-        int sub, so, n, i;
+        int sub, so, n, i, diff;
         int idx_char;
 
         /* Create a replacement string for matched pattern.
@@ -211,6 +221,7 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
         replacement.len = 0;
         for (pos = str_replace; *pos; pos++) {
 
+    DEBUG("%s %d\n", __func__, __LINE__);
             idx_char = *(pos + 1) - '0';
             if (*pos == '\\' && idx_char >= 0 && idx_char <= 9) {
                 so = pmatch[idx_char].rm_so;
@@ -230,21 +241,23 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
                 replacement.ptr[replacement.len++] = *pos;
             }
         }
+    DEBUG("%s %d\n", __func__, __LINE__);
 
         /* Insert replacement string into document */
 
-        n = pmatch[0].rm_eo - pmatch[0].rm_so;
-        BUF_RESERVE(buf, replacement.len - n);
+        diff = replacement.len - (pmatch[0].rm_eo - pmatch[0].rm_so);
+        BUF_RESERVE(buf, diff);
 
         memmove(buf->ptr + (buf_pos + pmatch[0].rm_so + replacement.len),
                 buf->ptr + (buf_pos + pmatch[0].rm_eo), 
                 buf->len - (buf_pos + pmatch[0].rm_eo));
         memcpy(buf->ptr + (buf_pos + pmatch[0].rm_so), replacement.ptr, replacement.len);
-        buf->len += n;
+        buf->len += diff;
 
         /* Advance position inside document so we don't process the same data again and again */
+        BUF_RESERVE(buf,1);
         buf->ptr[buf->len] = '\0';
-        buf_pos = (buf_pos + pmatch[0].rm_eo) + n;
+        buf_pos = (buf_pos + pmatch[0].rm_eo) + diff;
     }
 
     free(replacement.ptr);
@@ -253,8 +266,6 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
 void vmod_rewrite_re(struct sess *sp, const char *search, const char *replace) {
     struct buf_t buf;
     regex_t re_search;
-
-    DEBUG("AAAAAAAAAAAAAAAAAAAA\n");
 
     if (sp->step != STP_PREPRESP) {
         /* Can be called only from vcl_deliver */
@@ -268,11 +279,16 @@ void vmod_rewrite_re(struct sess *sp, const char *search, const char *replace) {
     }
 
     buf = _object_read(sp);
+    DEBUG("BEFORE: %s\n", buf.ptr);
+
+    DEBUG("%s %d\n", __func__, __LINE__);
 
     _object_rewrite(&buf, &re_search, replace);
+    DEBUG("%s %d\n", __func__, __LINE__);
 
     _object_write(sp, buf);
-    DEBUG("Buf: %s\n", buf.ptr);
+    DEBUG("%s %d\n", __func__, __LINE__);
+    DEBUG("AFTER: %s\n", buf.ptr);
 
     regfree(&re_search);
 }
