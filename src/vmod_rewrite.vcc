@@ -1,0 +1,3 @@
+Module rewrite
+Init init_function
+Function VOID rewrite_re(STRING, STRING)
