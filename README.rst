@@ -68,7 +68,7 @@ In your VCL you could then use this vmod along the following lines::
         import rewrite;
 
         sub vcl_deliver {
-                rewrite.rewrite_re("https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=[^&]+&", "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=FUPUJSJ9KCPAL&");
+                rewrite.rewrite_re("https://www.paypal.com/cgi-bin/webscr\?cmd=_donations&business=[^&]+&", "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=FUPUJSJ9KCPAL&");
         }
 
 (No I'm not that evil)
@@ -76,6 +76,6 @@ In your VCL you could then use this vmod along the following lines::
 COPYRIGHT
 =========
 
-See LICENSE for details.
+See COPYING for details.
 
 * Copyright (c) 2013 Aivars Kalvans <aivars.kalvans@gmail.com>
