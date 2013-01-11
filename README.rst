@@ -19,7 +19,9 @@ import rewrite;
 DESCRIPTION
 ===========
 
-Varnish vmod hack demonstrating how to rewrite HTML content.
+Varnish vmod hack demonstrating how to rewrite HTML content. It's not
+production-ready - I'm still learning and looking for the best way how
+to do it.
 
 `Buy me a drink!`__
 
