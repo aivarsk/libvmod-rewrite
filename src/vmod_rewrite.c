@@ -26,11 +26,10 @@
 */
 
 #define DEBUG(fmt, args...) do { \
-    FILE *f = fopen("/tmp/vmod_zzzz.log", "a"); \
+    FILE *f = fopen("/tmp/vmod_rewrite.log", "a"); \
     fprintf(f, fmt, ##args); \
     fclose(f); \
 } while (0)
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,23 +63,6 @@ struct buf_t {
         BUF_GROW(buf); \
     } \
 } while (0)
-
-static void _set_content_len(struct sess *sp, struct http *rsp, size_t len) {
-    char *header;
-
-    http_Unset(rsp, H_Content_Length);
-    /* Header must outlive our plugin */
-    header = WS_Alloc(sp->wrk->ws, 32);
-    sprintf(header, "Content-Length: %jd", (intmax_t)len);
-    http_SetH(rsp, rsp->nhd++, header);
-    http_GetHdr(sp->wrk->resp, H_Content_Length, &sp->wrk->h_content_length);
-}
-
-static void _fix_content_len(struct sess *sp, struct http *rsp, size_t len) {
-    if (http_GetHdr(rsp, H_Content_Length, NULL)) {
-        _set_content_len(sp, rsp, len);
-    }
-}
 
 static struct buf_t _object_read(struct sess *sp) {
     struct storage *st;
@@ -126,77 +108,35 @@ static struct buf_t _object_read(struct sess *sp) {
 	    } while (!VGZ_IbufEmpty(vg));
         }
 	VGZ_Destroy(&vg);
-
-        sp->wrk->res_mode &= ~RES_GUNZIP;
-        sp->wrk->res_mode &= ~RES_CHUNKED;
-        sp->wrk->res_mode |= RES_LEN;
-
-        http_Unset(sp->wrk->resp, H_Content_Encoding);
-
-        _set_content_len(sp, sp->wrk->resp, buf.len);
-    DEBUG("%s %d\n", __func__, __LINE__);
     }
     BUF_RESERVE(&buf, 1);
     buf.ptr[buf.len] = '\0';
-    DEBUG("%s %d\n", __func__, __LINE__);
     return buf;
 }
 
-/**
-Writes updated buf to object store and updates response object.
-
-XXX not clear if STV_alloc always returns a block >= requested size
-*/
 static void _object_write(struct sess *sp, struct buf_t buf) {
-    size_t pos = 0, l;
-    struct storage *st;
+    struct vsb *vsb;
+    char *header;
 
-    /* For varnish unittests */
-    if (buf.len == 0) {
-        return;
-    }
+    CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+    CHECK_OBJ_NOTNULL(sp->obj, OBJECT_MAGIC);
+    vsb = SMS_Makesynth(sp->obj);
+    AN(vsb);
+    VSB_bcpy(vsb, buf.ptr, buf.len);
+    SMS_Finish(sp->obj);
 
-    DEBUG("%s %d\n", __func__, __LINE__);
-    /* Create a new object and copy data to it */
-    sp->obj = STV_NewObject(sp, TRANSIENT_STORAGE, buf.len, &sp->wrk->exp, 0);
-    while (pos < buf.len) {
-        l = buf.len - pos;
-        st = STV_alloc(sp, l);
 
-        if (l <= st->space) {
-            memcpy(st->ptr, buf.ptr + pos, l);
-            st->len = l;
-        } else {
-            memcpy(st->ptr, buf.ptr + pos, st->space);
-            st->len = st->space;
-        }
+    http_Unset(sp->wrk->resp, H_Content_Length);
 
-    DEBUG("%s %d\n", __func__, __LINE__);
-        pos += st->len;
-        VTAILQ_INSERT_TAIL(&sp->obj->store, st, list);
-    }
-    if (st->len < st->space) {
-        STV_trim(st, st->len);
-    }
-    DEBUG("%s %d\n", __func__, __LINE__);
-
-    /* XXX: hmmm... */
-    sp->obj->len = buf.len;
-    sp->obj->gziped = 0;
-    sp->obj->xid = sp->xid;
-    sp->obj->response = sp->err_code;
-    sp->objcore = sp->obj->objcore;
-
-    //if (sp->obj->objcore != NULL) {
-    //  EXP_Insert(sp->obj);
-    //}
-    DEBUG("%s %d\n", __func__, __LINE__);
-
-    /* If Content-Length header is present, update it to actual length */
-    _fix_content_len(sp, sp->wrk->resp, buf.len);
+    /* Header must outlive our plugin */
+    header = WS_Alloc(sp->wrk->ws, 32);
+    sprintf(header, "Content-Length: %jd", (intmax_t)buf.len);
+    http_SetH(sp->wrk->resp, sp->wrk->resp->nhd++, header);
+    http_GetHdr(sp->wrk->resp, H_Content_Length, &sp->wrk->h_content_length);
 }
 
-static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *str_replace) {
+static int _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *str_replace) {
+    int rewrote = 0;
     size_t buf_pos;
     struct buf_t replacement;
     regmatch_t pmatch[10];
@@ -206,7 +146,6 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
     replacement.ptr = NULL;
     BUF_GROW(&replacement);
 
-    DEBUG("%s %d\n", __func__, __LINE__);
     buf_pos = 0;
     while (regexec(re_search, buf->ptr + buf_pos,
                 sizeof(pmatch) / sizeof(pmatch[0]), pmatch, 0) == 0) {
@@ -221,7 +160,6 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
         replacement.len = 0;
         for (pos = str_replace; *pos; pos++) {
 
-    DEBUG("%s %d\n", __func__, __LINE__);
             idx_char = *(pos + 1) - '0';
             if (*pos == '\\' && idx_char >= 0 && idx_char <= 9) {
                 so = pmatch[idx_char].rm_so;
@@ -241,10 +179,10 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
                 replacement.ptr[replacement.len++] = *pos;
             }
         }
-    DEBUG("%s %d\n", __func__, __LINE__);
 
         /* Insert replacement string into document */
 
+        rewrote = 1;
         diff = replacement.len - (pmatch[0].rm_eo - pmatch[0].rm_so);
         BUF_RESERVE(buf, diff);
 
@@ -261,6 +199,7 @@ static void _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *s
     }
 
     free(replacement.ptr);
+    return rewrote;
 }
 
 void vmod_rewrite_re(struct sess *sp, const char *search, const char *replace) {
@@ -279,16 +218,10 @@ void vmod_rewrite_re(struct sess *sp, const char *search, const char *replace) {
     }
 
     buf = _object_read(sp);
-    DEBUG("BEFORE: %s\n", buf.ptr);
 
-    DEBUG("%s %d\n", __func__, __LINE__);
-
-    _object_rewrite(&buf, &re_search, replace);
-    DEBUG("%s %d\n", __func__, __LINE__);
-
-    _object_write(sp, buf);
-    DEBUG("%s %d\n", __func__, __LINE__);
-    DEBUG("AFTER: %s\n", buf.ptr);
+    if (_object_rewrite(&buf, &re_search, replace)) {
+        _object_write(sp, buf);
+    }
 
     regfree(&re_search);
 }
