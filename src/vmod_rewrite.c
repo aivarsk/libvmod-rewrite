@@ -25,12 +25,6 @@
     parts of libvmod-example used as well as that of the covered work.}
 */
 
-#define DEBUG(fmt, args...) do { \
-    FILE *f = fopen("/tmp/vmod_rewrite.log", "a"); \
-    fprintf(f, fmt, ##args); \
-    fclose(f); \
-} while (0)
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <regex.h>
@@ -118,6 +112,12 @@ static void _object_write(struct sess *sp, struct buf_t buf) {
     struct vsb *vsb;
     char *header;
 
+    sp->wrk->is_gzip = 0;
+    sp->wrk->is_gunzip = 1;
+    /* FIXME: add gzip support */
+    sp->wrk->do_gzip = 0;
+    sp->wrk->do_gunzip = 0;
+
     CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
     CHECK_OBJ_NOTNULL(sp->obj, OBJECT_MAGIC);
     vsb = SMS_Makesynth(sp->obj);
@@ -125,14 +125,19 @@ static void _object_write(struct sess *sp, struct buf_t buf) {
     VSB_bcpy(vsb, buf.ptr, buf.len);
     SMS_Finish(sp->obj);
 
-
-    http_Unset(sp->wrk->resp, H_Content_Length);
+    sp->obj->gziped = 0;
+    sp->wrk->res_mode = 0;
+    sp->wrk->res_mode |= RES_LEN;
 
     /* Header must outlive our plugin */
-    header = WS_Alloc(sp->wrk->ws, 32);
-    sprintf(header, "Content-Length: %jd", (intmax_t)buf.len);
-    http_SetH(sp->wrk->resp, sp->wrk->resp->nhd++, header);
-    http_GetHdr(sp->wrk->resp, H_Content_Length, &sp->wrk->h_content_length);
+    http_Unset(sp->obj->http, H_Content_Length);
+    http_Unset(sp->wrk->resp, H_Content_Length);
+    http_Unset(sp->obj->http, H_Content_Encoding);
+    http_Unset(sp->wrk->resp, H_Content_Encoding);
+    http_Unset(sp->obj->http, H_Transfer_Encoding);
+    http_Unset(sp->wrk->resp, H_Transfer_Encoding);
+    http_PrintfHeader(sp->wrk, sp->fd, sp->obj->http, "Content-Length: %jd", (intmax_t)sp->obj->len);
+    http_PrintfHeader(sp->wrk, sp->fd, sp->wrk->resp, "Content-Length: %jd", (intmax_t)sp->obj->len);
 }
 
 static int _object_rewrite(struct buf_t *buf, regex_t *re_search, const char *str_replace) {
