@@ -37,6 +37,7 @@ fi
 
 set -ex
 
+if [ ! -d m4 ]; then mkdir m4; fi
 aclocal -I m4
 $LIBTOOLIZE --copy --force
 autoheader
