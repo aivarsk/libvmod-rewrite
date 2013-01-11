@@ -19,9 +19,7 @@ import rewrite;
 DESCRIPTION
 ===========
 
-Varnish vmod hack demonstrating how to rewrite HTML content. It does
-that for every client request so you should ensure backend does not send
-gziped content otherwise it will be unzipped for each client request.
+Varnish vmod hack demonstrating how to rewrite HTML content.
 
 `Buy me a drink!`__
 
