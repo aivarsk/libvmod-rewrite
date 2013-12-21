@@ -23,6 +23,9 @@ Varnish vmod hack demonstrating how to rewrite HTML content. It's not
 production-ready - I'm still learning and looking for the best way how
 to do it.
 
+Rewrite is performed only once and the rewritten document is stored
+in cache.
+
 `Buy me a drink!`__
 
 __ https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=FUPUJSJ9KCPAL&lc=LV&item_name=libvmod%2drewrite&currency_code=USD&bn=PP%2dDonationsBF%3abtn_donate_SM%2egif%3aNonHosted

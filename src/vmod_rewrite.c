@@ -217,7 +217,12 @@ void vmod_rewrite_re(struct sess *sp, const char *search, const char *replace) {
         return;
     }
 
-    if (regcomp(&re_search, search, REG_EXTENDED) != 0) {
+    /* object from cache, rewritten before */
+    if (sp->obj->hits > 0) {
+        return;
+    }
+
+    if (regcomp(&re_search, search, REG_EXTENDED | REG_NEWLINE) != 0) {
         abort();
         return;
     }
